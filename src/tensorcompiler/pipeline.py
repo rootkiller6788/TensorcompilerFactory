@@ -161,23 +161,33 @@ def check_one(g: Graph, strat: dict[str, Any], cfg: dict[str, Any],
     }
 
 
-def check_all(graphs: tuple[Graph, ...], cfg: dict[str, Any]) -> dict[str, Any]:
+def check_all(graphs: tuple[Graph, ...], cfg: dict[str, Any],
+              program_cache: dict[tuple[str, str], tuple[Graph, Any]] | None = None
+              ) -> dict[str, Any]:
     """全部 `(图, 策略)` 的语义 + 双成本核对。
 
     ⚠️ 核对的是**最终那一级**的程序 —— 它才是「编译器交出去的核」。
     中间级由 `build_ladder` 负责（每一级都要能跑、都要计数一致）。
+
+    `program_cache` 由 `compare_all` 填好：每条策略的最终 Program 只降级一次。
+    缓存里没有的键（比如单测直接调本函数）就现场降级，行为与不传缓存相同。
     """
     rows: list[dict[str, Any]] = []
     for g in graphs:
         env = base_environment(g, cfg)
         ref = {n: env[n] for n in g.outputs}
         for strat in enumerate_strategies(cfg):
-            stages = lower_ladder(g, strat, cfg)
-            last = stages[-1]
+            key = (g.name, strategy_id(strat))
+            hit = program_cache.get(key) if program_cache is not None else None
+            if hit is None:
+                last = lower_ladder(g, strat, cfg)[-1]
+                lg, program = last.lowering.graph, last.program
+            else:
+                lg, program = hit
             rows.append(check_one(g, strat, cfg,
-                                  feeds_for(last.lowering.graph, env), ref,
-                                  shapes_of(last.lowering.graph),
-                                  last.program, g.outputs))
+                                  feeds_for(lg, env), ref,
+                                  shapes_of(lg),
+                                  program, g.outputs))
     n = len(rows)
     return {
         "n_checked": n,
@@ -261,13 +271,17 @@ def run_pipeline(cfg: dict[str, Any], out_dir: str | Path, *,
     ladder = build_ladder(graphs, cfg)
     t_ladder = time.perf_counter()
 
-    comparison = CMP.compare_all(graphs, cfg)
+    # 对比与核对问的是同一件事：每条策略的**最终 Program**。
+    # 把 compare 已经降级出来的成品显式传给 check，省掉 320 次重复降级；
+    # 缓存是**这一次运行的局部变量**，不跨运行共享。
+    program_cache: dict[tuple[str, str], tuple[Graph, Any]] = {}
+    comparison = CMP.compare_all(graphs, cfg, program_cache)
     t_compare = time.perf_counter()
 
     attribution = AT.attribute_all(graphs, cfg)
     t_attr = time.perf_counter()
 
-    checks = check_all(graphs, cfg)
+    checks = check_all(graphs, cfg, program_cache)
     t_check = time.perf_counter()
 
     products: dict[str, Any] = {

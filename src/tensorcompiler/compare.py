@@ -77,17 +77,28 @@ def _best(cells: list[dict[str, Any]], axis: str) -> dict[str, Any]:
                + (c["strategy_id"],))
 
 
-def compare_graph(g: Graph, cfg: dict[str, Any]) -> dict[str, Any]:
-    """一张图的全部策略对比。"""
+def compare_graph(g: Graph, cfg: dict[str, Any],
+                  program_cache: dict[tuple[str, str], tuple[Graph, Any]] | None = None
+                  ) -> dict[str, Any]:
+    """一张图的全部策略对比。
+
+    `program_cache` 是可选的**显式**缓存（`(图名, 策略 id) → (最终图, 最终 Program)`）。
+    `pipeline` 把同一份缓存接着交给 `check_all`：两处问的是**同一个对象**
+    （每条策略的最终 Program），没有理由各降级一遍。缓存由调用方持有、
+    不跨运行共享 —— 换成全局 memo 会让「这次运行用的是哪份 cfg」变得不可见。
+    """
     strat_list = enumerate_strategies(cfg)
     cells: list[dict[str, Any]] = []
     for strat in strat_list:
         stages = lower_ladder(g, strat, cfg)
-        final = stages[-1].program
-        readings = C.program_cost(final, cfg["cost"])
         last = stages[-1]
+        final = last.program
+        readings = C.program_cost(final, cfg["cost"])
+        sid = strategy_id(strat)
+        if program_cache is not None:
+            program_cache[(g.name, sid)] = (last.lowering.graph, final)
         cells.append({
-            "strategy_id": strategy_id(strat),
+            "strategy_id": sid,
             "strategy": {k: strat[k] for k in sorted(strat)},
             "describe": describe(strat),
             "readings": {k: readings[k] for k in C.READING_KEYS},
@@ -161,8 +172,10 @@ def _ratio(base: float, now: float) -> float | None:
     return base / now
 
 
-def compare_all(graphs: tuple[Graph, ...], cfg: dict[str, Any]) -> dict[str, Any]:
-    per = [compare_graph(g, cfg) for g in graphs]
+def compare_all(graphs: tuple[Graph, ...], cfg: dict[str, Any],
+                program_cache: dict[tuple[str, str], tuple[Graph, Any]] | None = None
+                ) -> dict[str, Any]:
+    per = [compare_graph(g, cfg, program_cache) for g in graphs]
     return {
         "graphs": [p["graph"] for p in per],
         "n_graphs": len(per),
