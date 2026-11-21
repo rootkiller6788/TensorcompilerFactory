@@ -133,9 +133,13 @@ def check_one(g: Graph, strat: dict[str, Any], cfg: dict[str, Any],
     drift = 0.0
     ok = True
     for name in out_names:
-        if not bitwise_equal(ref[name], res.env[name]):
+        same = bitwise_equal(ref[name], res.env[name])
+        if not same:
             ok = False
-        drift = max(drift, max_abs_diff(ref[name], res.env[name]))
+            # ⚠️ 逐位相等的输出**不必再扫一遍**求最大绝对差：相等 ⇒ 差恒为 0。
+            #    320 格全绿时，这一条把每个输出张量从「扫两遍」变成「扫一遍」。
+            #    两条判据看的是同一份数据，所以跳过不会漏掉任何「不相等」的情形。
+            drift = max(drift, max_abs_diff(ref[name], res.env[name]))
 
     static_g = program.global_elems()
     dyn_g = res.global_elems()
