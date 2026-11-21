@@ -1,0 +1,91 @@
+{
+  "name": "constbias",
+  "note": "两个常量偏置先相加（整段是常量）—— 用来让 const_fold 有东西可做。⚠️ `b1`/`b2`/`c` 写成 1×32 而不是 (32,)：本项目的 IR 要求**节点输出必须是二维**，一维输出会被静默当成 N×N，而在这里**恰好也能算出正确结果**——「今天恰好对」与「对」分不开，所以从数据上就不给它机会。",
+  "tensors": [
+    {
+      "name": "A",
+      "shape": [
+        32,
+        64
+      ],
+      "role": "input"
+    },
+    {
+      "name": "B",
+      "shape": [
+        64,
+        32
+      ],
+      "role": "input"
+    },
+    {
+      "name": "b1",
+      "shape": [
+        1,
+        32
+      ],
+      "role": "const"
+    },
+    {
+      "name": "b2",
+      "shape": [
+        1,
+        32
+      ],
+      "role": "const"
+    },
+    {
+      "name": "c",
+      "shape": [
+        1,
+        32
+      ],
+      "role": "intermediate"
+    },
+    {
+      "name": "t",
+      "shape": [
+        32,
+        32
+      ],
+      "role": "intermediate"
+    },
+    {
+      "name": "out",
+      "shape": [
+        32,
+        32
+      ],
+      "role": "output"
+    }
+  ],
+  "nodes": [
+    {
+      "op": "add",
+      "inputs": [
+        "b1",
+        "b2"
+      ],
+      "output": "c"
+    },
+    {
+      "op": "matmul",
+      "inputs": [
+        "A",
+        "B"
+      ],
+      "output": "t"
+    },
+    {
+      "op": "add",
+      "inputs": [
+        "t",
+        "c"
+      ],
+      "output": "out"
+    }
+  ],
+  "outputs": [
+    "out"
+  ]
+}

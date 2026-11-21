@@ -1,0 +1,174 @@
+{
+  "acceptance": {
+    "max_semantic_drift": 0.0,
+    "min_attributed_passes": 3,
+    "min_const_fold_saved_ops": 1,
+    "min_cost_crosscheck_agreement": 1.0,
+    "min_cse_saved_ops": 1,
+    "min_funnel_stages": 8,
+    "min_fusion_kernel_reduction": 1.3,
+    "min_graphs": 4,
+    "min_kernels_per_graph": 1,
+    "min_lowering_paths_with_distinct_cost": 2,
+    "min_normalize_saved_ops": 1,
+    "min_passes": 8,
+    "min_strategies": 24,
+    "min_tiling_gain_over_fusion": 1.5,
+    "min_total_traffic_reduction": 2.0
+  },
+  "cost": {
+    "bytes_per_elem": 4,
+    "flops_per_s": 1000000000000.0,
+    "global_bandwidth_gb_s": 600.0,
+    "launch_overhead_us": 3.0,
+    "max_threads_per_sm": 1024,
+    "register_file_per_sm": 65536,
+    "shared_bandwidth_gb_s": 4000.0,
+    "shared_per_sm": 49152,
+    "sm_count": 20,
+    "threads_per_block": 256
+  },
+  "expectations": [
+    {
+      "claim": "融合带来的访存降幅 > 分块带来的访存降幅",
+      "detail": "两者都按「相对朴素基线的访存字节降幅」算，同一口径",
+      "id": "fusion_dominates_tiling"
+    },
+    {
+      "claim": "各 pass 的消融贡献之和 == 全链相对朴素基线的总变化",
+      "detail": "消融是「一次只关一个」，逐项可加需要**没有交互项**",
+      "id": "attribution_sums_to_total"
+    },
+    {
+      "claim": "每一个可选 pass 在每一张图上被关掉后，至少有一个读数变化",
+      "detail": "否则它是装饰 —— 但「装饰」本身是合法的产出，只是要报出来",
+      "id": "every_optional_pass_is_load_bearing"
+    },
+    {
+      "claim": "`blocked` 布局的占用率不低于 `row_major`",
+      "detail": "同一格其他轴固定，只换 layout 比较占用率",
+      "id": "blocked_layout_improves_occupancy"
+    },
+    {
+      "claim": "把行归约融进矩阵乘，访存不会变差",
+      "detail": "同一格其他轴固定，只换 fusion 开关比较访存",
+      "id": "fusing_a_row_reduction_never_hurts"
+    },
+    {
+      "claim": "延迟最低的那条策略在**所有图**上是同一条",
+      "detail": "「同一条」= strategy_id 相同（strategy_id 只由轴值决定）",
+      "id": "best_strategy_is_the_same_across_graphs"
+    },
+    {
+      "claim": "降级前后**逐位相等**（不是「近似」）",
+      "detail": "浮点加法不满足结合律，所以这条要求降级不改变归约顺序",
+      "id": "semantic_equivalence_is_bit_exact"
+    },
+    {
+      "claim": "沿 pass 链，全局访存逐级不增",
+      "detail": "没有哪个 pass 会让程序做更多全局访存",
+      "id": "funnel_is_monotone"
+    },
+    {
+      "claim": "kernel launch 数恰好等于核数",
+      "detail": "launch 是核的属性，不是运行期的",
+      "id": "launch_count_equals_kernel_count"
+    },
+    {
+      "claim": "分块越大，访存越少**且延迟越低**",
+      "detail": "同时看访存与延迟两个读数 —— 只报访存会漏掉代价",
+      "id": "bigger_tile_reduces_traffic"
+    },
+    {
+      "claim": "分块越大，寄存器压力越大",
+      "detail": "更大的 tile 要更多的累加器与索引",
+      "id": "registers_grow_with_tile_size"
+    },
+    {
+      "claim": "occupancy ≤ 1.0",
+      "detail": "占用率是比例；>1 说明模型算错了",
+      "id": "occupancy_never_exceeds_one"
+    },
+    {
+      "claim": "开 CSE 后的全局访存 ≤ 关 CSE",
+      "detail": "CSE 只删重复计算，不改变剩余算子的访存",
+      "id": "cse_never_increases_traffic"
+    },
+    {
+      "claim": "buffer 复用的峰值内存 ≤ 不复用",
+      "detail": "复用是「同一块显存干两件事」，不会让峰值变大",
+      "id": "reuse_reduces_peak_memory"
+    },
+    {
+      "claim": "不同的降级策略给出不同的成本向量",
+      "detail": "否则「多策略对比」没有信息量",
+      "id": "distinct_strategies_give_distinct_cost"
+    }
+  ],
+  "graphs_dir": "data/graphs",
+  "passes": {
+    "optional": [
+      "normalize",
+      "const_fold",
+      "cse",
+      "fusion",
+      "tiling",
+      "layout",
+      "memory_plan"
+    ],
+    "order": [
+      "normalize",
+      "shape_infer",
+      "const_fold",
+      "cse",
+      "fusion",
+      "tiling",
+      "layout",
+      "memory_plan",
+      "lower"
+    ]
+  },
+  "seed": 20261002,
+  "strategies": {
+    "cse": [
+      true,
+      false
+    ],
+    "fusion": [
+      true,
+      false
+    ],
+    "layout": [
+      "row_major",
+      "blocked"
+    ],
+    "memory_plan": [
+      "naive",
+      "reuse"
+    ],
+    "tiling": [
+      "none",
+      "t8",
+      "t16",
+      "t32"
+    ]
+  },
+  "tiling_table": {
+    "none": null,
+    "t16": [
+      16,
+      16,
+      16
+    ],
+    "t32": [
+      32,
+      32,
+      32
+    ],
+    "t8": [
+      8,
+      8,
+      8
+    ]
+  }
+}

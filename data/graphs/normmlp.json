@@ -1,0 +1,112 @@
+{
+  "name": "normmlp",
+  "note": "LayerNorm → MatMul → BiasAdd → GELU。归约算子在最前面，融合会把整个归一化折进第一个核。",
+  "tensors": [
+    {
+      "name": "X",
+      "shape": [
+        32,
+        64
+      ],
+      "role": "input"
+    },
+    {
+      "name": "g",
+      "shape": [
+        64
+      ],
+      "role": "input"
+    },
+    {
+      "name": "b",
+      "shape": [
+        64
+      ],
+      "role": "input"
+    },
+    {
+      "name": "W",
+      "shape": [
+        64,
+        32
+      ],
+      "role": "input"
+    },
+    {
+      "name": "bias",
+      "shape": [
+        32
+      ],
+      "role": "input"
+    },
+    {
+      "name": "n",
+      "shape": [
+        32,
+        64
+      ],
+      "role": "intermediate"
+    },
+    {
+      "name": "t",
+      "shape": [
+        32,
+        32
+      ],
+      "role": "intermediate"
+    },
+    {
+      "name": "t2",
+      "shape": [
+        32,
+        32
+      ],
+      "role": "intermediate"
+    },
+    {
+      "name": "out",
+      "shape": [
+        32,
+        32
+      ],
+      "role": "output"
+    }
+  ],
+  "nodes": [
+    {
+      "op": "layernorm",
+      "inputs": [
+        "X",
+        "g",
+        "b"
+      ],
+      "output": "n"
+    },
+    {
+      "op": "matmul",
+      "inputs": [
+        "n",
+        "W"
+      ],
+      "output": "t"
+    },
+    {
+      "op": "add",
+      "inputs": [
+        "t",
+        "bias"
+      ],
+      "output": "t2"
+    },
+    {
+      "op": "gelu",
+      "inputs": [
+        "t2"
+      ],
+      "output": "out"
+    }
+  ],
+  "outputs": [
+    "out"
+  ]
+}

@@ -1,0 +1,113 @@
+{
+  "name": "dual",
+  "note": "同一个 matmul(A, B) 被算了两遍（一条走 gelu、一条走 bias）—— 用来让 CSE 有东西可做。",
+  "tensors": [
+    {
+      "name": "A",
+      "shape": [
+        32,
+        64
+      ],
+      "role": "input"
+    },
+    {
+      "name": "B",
+      "shape": [
+        64,
+        32
+      ],
+      "role": "input"
+    },
+    {
+      "name": "bias",
+      "shape": [
+        32
+      ],
+      "role": "input"
+    },
+    {
+      "name": "t0",
+      "shape": [
+        32,
+        32
+      ],
+      "role": "intermediate"
+    },
+    {
+      "name": "t1",
+      "shape": [
+        32,
+        32
+      ],
+      "role": "intermediate"
+    },
+    {
+      "name": "t2",
+      "shape": [
+        32,
+        32
+      ],
+      "role": "intermediate"
+    },
+    {
+      "name": "t3",
+      "shape": [
+        32,
+        32
+      ],
+      "role": "intermediate"
+    },
+    {
+      "name": "out",
+      "shape": [
+        32,
+        32
+      ],
+      "role": "output"
+    }
+  ],
+  "nodes": [
+    {
+      "op": "matmul",
+      "inputs": [
+        "A",
+        "B"
+      ],
+      "output": "t0"
+    },
+    {
+      "op": "gelu",
+      "inputs": [
+        "t0"
+      ],
+      "output": "t1"
+    },
+    {
+      "op": "matmul",
+      "inputs": [
+        "A",
+        "B"
+      ],
+      "output": "t2"
+    },
+    {
+      "op": "add",
+      "inputs": [
+        "t2",
+        "bias"
+      ],
+      "output": "t3"
+    },
+    {
+      "op": "add",
+      "inputs": [
+        "t1",
+        "t3"
+      ],
+      "output": "out"
+    }
+  ],
+  "outputs": [
+    "out"
+  ]
+}

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tensorcompiler"
+version = "1.0.0"
+description = "TensorCompilerFactory：Tensor Graph → IR → Fusion → Kernel 的降级链（漏斗差额 + 双成本互校）"
+requires-python = ">=3.12"
+#: **核心路径零第三方依赖** —— 只用标准库。
+#: 本机没有 torch / triton / numpy，也没有可用 GPU（`nvidia-smi` 起不来），
+#: 所以本项目交付的是**可执行的数字孪生**：真的把图逐级 lower 成 Kernel IR，
+#: 真的按分块循环跑一遍算出数值，真的逐次计数访存 —— 而不是把 kernel 编译出来跑。
+dependencies = []
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+#: 本项目**只做运行时核对**（不建 tests/）：
+#: 关键不变量做成流水线自身的运行时核对 —— 验收门槛 + 对抗用例 + 期望表。
+#: 这个段保留，是为了哪天要加测试时不用再想 addopts 写什么。
+addopts = "-q"
+testpaths = ["tests"]

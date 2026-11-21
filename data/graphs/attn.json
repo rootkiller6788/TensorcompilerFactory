@@ -1,0 +1,98 @@
+{
+  "name": "attn",
+  "note": "一个注意力头：MatMul(Q, Kᵀ) → Softmax → MatMul(·, V)。两次 matmul 中间夹一个归约算子 —— 用来测「归约→归约能不能融」（不能，这正是 flash attention 要靠 online softmax 绕开的那件事）。",
+  "tensors": [
+    {
+      "name": "Q",
+      "shape": [
+        32,
+        64
+      ],
+      "role": "input"
+    },
+    {
+      "name": "K",
+      "shape": [
+        32,
+        64
+      ],
+      "role": "input"
+    },
+    {
+      "name": "V",
+      "shape": [
+        32,
+        64
+      ],
+      "role": "input"
+    },
+    {
+      "name": "Kt",
+      "shape": [
+        64,
+        32
+      ],
+      "role": "intermediate"
+    },
+    {
+      "name": "s",
+      "shape": [
+        32,
+        32
+      ],
+      "role": "intermediate"
+    },
+    {
+      "name": "p",
+      "shape": [
+        32,
+        32
+      ],
+      "role": "intermediate"
+    },
+    {
+      "name": "out",
+      "shape": [
+        32,
+        64
+      ],
+      "role": "output"
+    }
+  ],
+  "nodes": [
+    {
+      "op": "transpose",
+      "inputs": [
+        "K"
+      ],
+      "output": "Kt"
+    },
+    {
+      "op": "matmul",
+      "inputs": [
+        "Q",
+        "Kt"
+      ],
+      "output": "s"
+    },
+    {
+      "op": "softmax",
+      "inputs": [
+        "s"
+      ],
+      "output": "p",
+      "axis": -1
+    },
+    {
+      "op": "matmul",
+      "inputs": [
+        "p",
+        "V"
+      ],
+      "output": "out"
+    }
+  ],
+  "outputs": [
+    "out"
+  ]
+}
