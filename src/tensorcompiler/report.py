@@ -300,8 +300,11 @@ def _section_checks(p: dict[str, Any]) -> list[str]:
 
 def _section_footer(p: dict[str, Any]) -> list[str]:
     L = ["## 产物清单", ""]
+    # ⚠️ 列名是「字节」，就**必须**数是字节：`_dump` 返回 `str`，`len()` 是字符数。
+    #    报告与产物里全是中文，两者差 1.3 倍以上（C.345 的同一个坑，
+    #    `visualize.verify` 已经踩过一次；这里是第二处，不能靠「那边改过了」兜住）。
     L.extend(_table(["文件", "大小（字节）", "进版本摘要"],
-                    [[f"`{k}`", str(len(_dump(v))), "是" if k in
+                    [[f"`{k}`", str(len(_dump(v).encode("utf-8"))), "是" if k in
                       p["version.json"]["versioned_files"] else "否"]
                      for k, v in sorted(p.items())]))
     L.append("")
