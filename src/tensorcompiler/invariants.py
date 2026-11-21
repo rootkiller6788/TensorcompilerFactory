@@ -488,16 +488,14 @@ def _c_flops_prog(p, c, gs):
     bad = []
     n_checked = 0
     for gname, rows in _ladder_rows(p).items():
-        by = {r["name"]: r for r in rows}
-        for i, name in enumerate(rows):
-            if name["name"] not in prog or i == 0:
+        for i, stage in enumerate(rows):
+            if stage["name"] not in prog or i == 0:
                 continue
             n_checked += 1
-            if name["readings"]["flops"] != rows[i - 1]["readings"]["flops"]:
-                bad.append(f"{gname}@{name['name']}: "
+            if stage["readings"]["flops"] != rows[i - 1]["readings"]["flops"]:
+                bad.append(f"{gname}@{stage['name']}: "
                            f"{rows[i - 1]['readings']['flops']} → "
-                           f"{name['readings']['flops']}")
-        _ = by
+                           f"{stage['readings']['flops']}")
     return (not bad and n_checked > 0,
             f"{n_checked} 级程序级 pass，工作量逐级不变" if not bad and n_checked
             else ("没查到程序级 pass" if not n_checked else f"变了：{bad[:3]}"))

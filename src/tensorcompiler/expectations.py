@@ -107,11 +107,15 @@ def _ev_blocked_layout_improves_occupancy(p, c):
 
 
 def _ev_fusing_a_row_reduction_never_hurts(p, c):
-    """把行归约（softmax/layernorm）融进矩阵乘，访存会不会变差。"""
+    """把行归约（softmax/layernorm）融进矩阵乘，访存会不会变差。
+
+    ⚠️ 判据是**全部图上的 fusion 开关对**，不是「只挑含行归约的图」：
+    这是一个**超集**检验 —— 「融合在任何图上都不让访存变大」蕴含
+    「把行归约融进矩阵乘不让访存变大」。代价是它更严，而不是更松；
+    好处是它不需要在格子上额外带算子元数据（格子只记读数与轴值）。
+    """
     rows = []
     for pg in p["compare.json"]["per_graph"]:
-        # 只在「图里含行归约」的图上问这个问题
-        has_rowred = any("softmax" in cell["strategy_id"] or True for cell in [])
         by = {}
         for cell in pg["cells"]:
             key = tuple(sorted((k, v) for k, v in cell["strategy"].items()
