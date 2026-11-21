@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import Any, Iterable
 
 Shape = tuple[int, ...]
@@ -90,28 +91,47 @@ class Graph:
     outputs: tuple[str, ...]
 
     # ---- 索引 ----
-    def tmap(self) -> dict[str, Tensor]:
+    # ⚠️ 这三个索引**只建一次**（`cached_property` 走实例 `__dict__`，
+    #    所以对 frozen dataclass 也成立）。`shape_of` / `producers` 在降级链里
+    #    被调用上万次，原来的实现每次线性扫一遍张量表 —— 图小的时候看不出来，
+    #    但它是「每个核 × 每个外部输入」的乘数，不是一次性成本。
+    #    缓存的是**不可变图**的索引；图本身 frozen，不存在「建完就过期」。
+    @cached_property
+    def _tensor_map(self) -> dict[str, Tensor]:
         return {t.name: t for t in self.tensors}
 
-    def shape_of(self, name: str) -> Shape:
-        for t in self.tensors:
-            if t.name == name:
-                return t.shape
-        raise KeyError(f"图 {self.name} 里没有张量 {name!r}")
-
-    def role_of(self, name: str) -> str:
-        for t in self.tensors:
-            if t.name == name:
-                return t.role
-        raise KeyError(f"图 {self.name} 里没有张量 {name!r}")
-
-    def producers(self) -> dict[str, Node]:
+    @cached_property
+    def _producer_map(self) -> dict[str, Node]:
         return {n.output: n for n in self.nodes}
 
-    def inputs(self) -> tuple[str, ...]:
+    @cached_property
+    def _input_names(self) -> tuple[str, ...]:
         """图的**叶子**：不是任何节点输出的张量。"""
-        produced = {n.output for n in self.nodes}
+        produced = set(self._producer_map)
         return tuple(t.name for t in self.tensors if t.name not in produced)
+
+    def tmap(self) -> dict[str, Tensor]:
+        # 返回**副本**：调用方拿到的仍是一份可以随便改的字典，
+        # 不会把缓存本身改坏（与缓存前的契约一致）。
+        return dict(self._tensor_map)
+
+    def shape_of(self, name: str) -> Shape:
+        t = self._tensor_map.get(name)
+        if t is None:
+            raise KeyError(f"图 {self.name} 里没有张量 {name!r}")
+        return t.shape
+
+    def role_of(self, name: str) -> str:
+        t = self._tensor_map.get(name)
+        if t is None:
+            raise KeyError(f"图 {self.name} 里没有张量 {name!r}")
+        return t.role
+
+    def producers(self) -> dict[str, Node]:
+        return dict(self._producer_map)
+
+    def inputs(self) -> tuple[str, ...]:
+        return self._input_names
 
     def topo_order(self) -> tuple[Node, ...]:
         """拓扑序。**必须确定性** —— 用「就绪集合按名字排序」而不是遍历字典。"""
