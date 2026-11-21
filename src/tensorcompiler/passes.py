@@ -512,34 +512,47 @@ def lower_ladder(graph: Graph, strat: dict[str, Any],
     stages: list[Stage] = [Stage("as_written", lo, build(lo, cost),
                                  {"note": "朴素降级：每个算子一个核，不分块"})]
 
+    def emit(name: str, meta: dict[str, Any], *, skipped: bool = False) -> None:
+        """落一级。**lowering 没变就复用上一级的 Program**。
+
+        ⚠️ 被跳过的 pass 会留下 `skipped=True` 的一级，它的 lowering 与上一级
+        完全相同；图级 pass 在图上没有可做的事时，`initial_lowering` 也会
+        给出一个**与上一级相等**的 lowering（Graph 是值相等的 frozen dataclass）。
+        这两种情况下 `build` 的产物必然与上一级逐字段相同 —— 再建一遍是纯开销。
+        复用只依赖**相等**（`lo == prev.lowering`），不依赖「哪个 pass 叫什么名字」，
+        所以不会出现「换个 pass 实现就复用错了」。
+        """
+        prev = stages[-1]
+        prog = prev.program if (lo is prev.lowering or lo == prev.lowering) \
+            else build(lo, cost)
+        stages.append(Stage(name, lo, prog, meta, skipped=skipped))
+
     for name in order:
         enabled = name not in optional or bool(strat.get(name, True))
         if not enabled:
-            stages.append(Stage(name, lo, build(lo, cost),
-                                {"skipped": True}, skipped=True))
+            emit(name, {"skipped": True}, skipped=True)
             continue
         if name in GRAPH_PASSES:
             g, count = GRAPH_PASSES[name](g)
             lo = initial_lowering(g)
             # 图变了 ⇒ 后面的程序级 pass 必须从新的朴素降级重来
-            stages.append(Stage(name, lo, build(lo, cost),
-                                {GRAPH_PASS_META[name]: count}))
+            emit(name, {GRAPH_PASS_META[name]: count})
         elif name == "fusion":
             lo, meta = fuse(lo)
-            stages.append(Stage(name, lo, build(lo, cost), dict(meta)))
+            emit(name, dict(meta))
         elif name == "tiling":
             lo, meta = apply_tiling(lo, strat.get("tiling", "none"),
                                     cfg["tiling_table"])
-            stages.append(Stage(name, lo, build(lo, cost), dict(meta)))
+            emit(name, dict(meta))
         elif name == "layout":
             lo, meta = apply_layout(lo, strat.get("layout", "row_major"))
-            stages.append(Stage(name, lo, build(lo, cost), dict(meta)))
+            emit(name, dict(meta))
         elif name == "memory_plan":
             lo, meta = apply_memory_plan(lo, strat.get("memory_plan", "naive"))
-            stages.append(Stage(name, lo, build(lo, cost), dict(meta)))
+            emit(name, dict(meta))
         elif name == "lower":
             lo, meta = apply_lower(lo, cost)
-            stages.append(Stage(name, lo, build(lo, cost), dict(meta)))
+            emit(name, dict(meta))
         else:
             raise ValueError(f"passes.order 里的 {name!r} 没有实现")
 
