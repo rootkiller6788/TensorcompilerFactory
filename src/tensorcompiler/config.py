@@ -243,6 +243,18 @@ def validate_config(cfg: dict[str, Any]) -> None:
         n *= len(v)
     if n < int(cfg["acceptance"]["min_strategies"]):
         errs.append(f"策略空间只有 {n} 条，门槛要求 ≥ {cfg['acceptance']['min_strategies']}")
+    # ⚠️ 策略轴的**名字**必须是可选 pass。写错一个字母（`fussion`）不会报错 ——
+    #    它会变成一个「永远取默认值」的轴，矩阵照样填满、缺口照样 0，
+    #    只是那个 pass 的开关从此不起作用。这里在配置期就拦住。
+    unknown_axes = sorted(set(strat) - set(optional))
+    if unknown_axes:
+        errs.append(f"strategies 里的轴 {unknown_axes} 不在 passes.optional 里 —— "
+                    "一个永远不会被读到的策略轴，等于没有这个轴")
+    for axis, vals in strat.items():
+        if isinstance(vals, list) and len(set(map(str, vals))) != len(vals):
+            errs.append(f"strategies.{axis} 有重复取值：{vals} —— "
+                        "重复值会产生同一条策略 id，矩阵格子互相覆盖")
+
     for name in strat.get("tiling", []):
         if name not in cfg["tiling_table"]:
             errs.append(f"strategies.tiling 里的 {name!r} 在 tiling_table 里没有定义")
@@ -251,6 +263,13 @@ def validate_config(cfg: dict[str, Any]) -> None:
             if raw is not None and len(raw) != 3:
                 errs.append(f"tiling_table[{name!r}] 必须是三元组 (tm,tn,tk) 或 null，"
                             f"实际 {raw!r}")
+            elif raw is not None and any(int(x) <= 0 for x in raw):
+                errs.append(f"tiling_table[{name!r}] = {raw!r} 里有非正数 —— "
+                            "tile 是循环步长，0 会让 `ceil(dim / t)` 直接抛错")
+    unused_tiles = sorted(set(cfg["tiling_table"]) - set(strat.get("tiling", [])))
+    if unused_tiles:
+        errs.append(f"tiling_table 里的 {unused_tiles} 不被 strategies.tiling 使用 —— "
+                    "定义了却挑不到的档位是死配置（改了它，任何产物都不会变）")
 
     # ---- 成本模型 ----
     c = cfg["cost"]

@@ -75,14 +75,32 @@ def _validate_graph(g: Graph, src: Path) -> None:
     if not g.outputs:
         errs.append("图必须至少声明一个输出")
 
-    # ⚠️ **IR 的维数约定**：叶子（输入/常量）可以是一维向量或标量（广播用），
-    #    但**任何节点的输出必须是二维**。
+    # ⚠️ **节点输出必须唯一**。重复输出会让 `producers()` 静默取最后一个，
+    #    而拓扑序里出现两个生产者 —— 「一个张量有几个生产者」有了两个答案。
+    #    `Graph.topo_order()` 也会拒绝，但那里的报错发生在降级途中；
+    #    数据文件里写错时，这一步的报错更贴近出错的源文件。
+    out_counts: dict[str, int] = {}
+    for n in g.nodes:
+        out_counts[n.output] = out_counts.get(n.output, 0) + 1
+    dup_outs = sorted(o for o, k in out_counts.items() if k > 1)
+    if dup_outs:
+        errs.append(f"节点输出有重复：{dup_outs} —— 一个张量只能有一个生产者")
+
+    # ⚠️ **IR 的维数约定**：叶子（输入/常量）可以是标量 / 一维向量 / 二维矩阵
+    #    （前两者用于广播），但**任何节点的输出必须是二维**。
     #    理由不是洁癖：成本模型与解释器都以「输出 tile 是 tm×tn」为前提，
     #    一维输出会被静默当成 `N×N` 或 `1×N`，而两种解释在 `constbias` 上
     #    **恰好都能算出正确的最终结果**（因为后面那次 `add` 会广播回来）。
     #    ⇒ 「今天恰好对」与「对」分不开，所以在这里把它挡住。
-    produced = {n.output for n in g.nodes}
+    produced = set(out_counts)
+    leaf_roles = {"input", "const"}
+    all_roles = leaf_roles | {"intermediate", "output"}
     for t in g.tensors:
+        if t.role not in all_roles:
+            errs.append(
+                f"张量 {t.name!r} 的角色 {t.role!r} 不在 {sorted(all_roles)} 里 —— "
+                "角色决定 synth_feeds 要不要给它造值，写错会推迟成真值路径的 KeyError"
+            )
         if t.name in produced and len(t.shape) != 2:
             errs.append(
                 f"张量 {t.name!r} 是节点输出，形状却是 {list(t.shape)} —— "
@@ -90,6 +108,21 @@ def _validate_graph(g: Graph, src: Path) -> None:
                 "（一维向量只允许作为叶子输入参与广播；"
                 "要一维输出就写成 1×N）"
             )
+        elif t.name not in produced:
+            # 叶子只支持 0/1/2 维：解释器与成本模型都按「标量 / 行向量 / 矩阵」处理。
+            # 3 维叶子会被 `synth_feeds` 静默当成 `shape[0] × shape[-1]` 的矩阵 ——
+            # 数据形状与声明形状对不上，却不一定当场报错。
+            if len(t.shape) > 2:
+                errs.append(
+                    f"叶子张量 {t.name!r} 是 {len(t.shape)} 维 {list(t.shape)} —— "
+                    "本项目的 IR 只支持 0/1/2 维叶子（标量 / 向量 / 矩阵）"
+                )
+            if t.role not in leaf_roles:
+                errs.append(
+                    f"叶子张量 {t.name!r} 的角色是 {t.role!r} —— "
+                    "不是任何节点的输出，就必须是 input 或 const"
+                    "（否则 synth_feeds 不会给它造值）"
+                )
 
     # 环检测（顺带检查引用顺序）
     try:
