@@ -133,29 +133,71 @@ class Graph:
     def inputs(self) -> tuple[str, ...]:
         return self._input_names
 
-    def topo_order(self) -> tuple[Node, ...]:
-        """拓扑序。**必须确定性** —— 用「就绪集合按名字排序」而不是遍历字典。"""
-        produced = {n.output for n in self.nodes}
-        by_out = {n.output: n for n in self.nodes}
-        done: set[str] = {t.name for t in self.tensors if t.name not in produced}
-        remaining = list(self.nodes)
+    @cached_property
+    def _topo_order(self) -> tuple[Node, ...]:
+        """拓扑序。**必须确定性** —— 用「就绪集合按名字排序」而不是遍历字典。
+
+        算法是**分批 Kahn**：每一轮取出当前所有入度为 0 的节点，
+        批内按 `output` 名排序后整批取出，再解锁下一批。
+        这与原来的「每轮扫描剩余节点、`remaining.remove`」逐条同序 ——
+        每一轮的就绪集合定义完全相同（输入都在 `done` 里），所以除了复杂度
+        从 O(V²) 降到 O(V+E + Σ批内排序) 之外，**顺序一个元素都不变**：
+        漏斗的级名、核的 `kid`、partition 都依赖这个顺序。
+
+        ⚠️ 节点输出必须**唯一**。重复输出会让 `producers()` 静默取最后一个，
+        拓扑序里却出现两个生产者 —— 「一个张量有几个生产者」这件事有两个答案。
+        这里显式拒绝（`graph._validate_graph` 在加载时也拦一道）。
+        """
+        if len(self._producer_map) != len(self.nodes):
+            counts: dict[str, int] = {}
+            for n in self.nodes:
+                counts[n.output] = counts.get(n.output, 0) + 1
+            dup = sorted(k for k, v in counts.items() if v > 1)
+            raise ValueError(
+                f"图 {self.name} 有重复的节点输出：{dup} —— "
+                "一个张量只能有一个生产者"
+            )
+
+        unknown = sorted({i for n in self.nodes for i in n.inputs}
+                         - set(self._tensor_map))
+        if unknown:
+            raise ValueError(
+                f"图 {self.name} 有环或引用了不存在的张量：缺 {unknown}"
+            )
+
+        produced = set(self._producer_map)
+        indeg = {n.output: sum(1 for i in n.inputs if i in produced)
+                 for n in self.nodes}
+        dependents: dict[str, list[str]] = {}
+        for n in self.nodes:
+            for i in n.inputs:
+                if i in produced:
+                    dependents.setdefault(i, []).append(n.output)
+
+        ready = [n for n in self.nodes if indeg[n.output] == 0]
         order: list[Node] = []
-        while remaining:
-            ready = [n for n in remaining
-                     if all(i in done for i in n.inputs)]
-            if not ready:
-                missing = sorted({i for n in remaining for i in n.inputs} - done)
-                raise ValueError(
-                    f"图 {self.name} 有环或引用了不存在的张量：缺 {missing}"
-                )
+        while ready:
             # ⚠️ 按 output 名字排序 ⇒ 同样的图永远得到同样的拓扑序。
             #    用「列表里的下一个」会让顺序随输入文件的键序漂移。
-            ready.sort(key=lambda n: n.output)
-            for n in ready:
+            batch = sorted(ready, key=lambda n: n.output)
+            ready = []
+            for n in batch:
                 order.append(n)
-                done.add(n.output)
-                remaining.remove(n)
+                for dep in dependents.get(n.output, ()):
+                    indeg[dep] -= 1
+                    if indeg[dep] == 0:
+                        ready.append(self._producer_map[dep])
+        if len(order) != len(self.nodes):
+            done = {n.output for n in order}
+            missing = sorted({i for n in self.nodes if n.output not in done
+                              for i in n.inputs if i not in done})
+            raise ValueError(
+                f"图 {self.name} 有环或引用了不存在的张量：缺 {missing}"
+            )
         return tuple(order)
+
+    def topo_order(self) -> tuple[Node, ...]:
+        return self._topo_order
 
     def n_ops(self) -> int:
         return len(self.nodes)
