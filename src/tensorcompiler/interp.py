@@ -320,29 +320,54 @@ def _as_tile(raw: T2, tm: int, tn: int) -> T2:
     )
 
 
-def _apply_binary(acc_tile: T2, raw: T2, f) -> None:
-    """把 `raw` 按广播**就地**作用到 `acc_tile` 上。
+#: 逐元素合并的四个原语。**在列表推导里内联 `+` / `*`**，而不是传一个
+#: `lambda x, y: x + y`：后者会对**每个元素**发起一次 Python 调用，
+#: 而 `_apply_binary` 是全链最热的位置之一（数十万次元素级操作）。
+#: 语义完全相同 —— 这里省的是调用开销，不是运算本身。
+def _add_lists(a: list[float], b: list[float]) -> list[float]:
+    return [x + y for x, y in zip(a, b)]
+
+
+def _mul_lists(a: list[float], b: list[float]) -> list[float]:
+    return [x * y for x, y in zip(a, b)]
+
+
+def _add_scalar(a: list[float], v: float) -> list[float]:
+    return [x + v for x in a]
+
+
+def _mul_scalar(a: list[float], v: float) -> list[float]:
+    return [x * v for x in a]
+
+
+def _apply_binary(acc_tile: T2, raw: T2, op: str) -> None:
+    """把 `raw` 按广播**就地**作用到 `acc_tile` 上（`op` 是 `"add"` / `"mul"`）。
 
     ⚠️ 广播必须在这里发生（而不是在 `_tile_of` 里预复制）——
     见 `_tile_of` 的注释：预复制会污染访存计数。
     """
+    if op == "add":
+        merge, scalar = _add_lists, _add_scalar
+    elif op == "mul":
+        merge, scalar = _mul_lists, _mul_scalar
+    else:
+        raise ValueError(f"未知二元算子 {op!r}")
     tr, tc = len(acc_tile), len(acc_tile[0])
     rr, rc = len(raw), len(raw[0])
     if (rr, rc) == (tr, tc):
         for r in range(tr):
-            acc_tile[r] = [f(x, y) for x, y in zip(acc_tile[r], raw[r])]
+            acc_tile[r] = merge(acc_tile[r], raw[r])
     elif rr == 1 and rc == tc:
         seg = raw[0]
         for r in range(tr):
-            acc_tile[r] = [f(x, y) for x, y in zip(acc_tile[r], seg)]
+            acc_tile[r] = merge(acc_tile[r], seg)
     elif (rr, rc) == (1, 1):
         v = raw[0][0]
         for r in range(tr):
-            acc_tile[r] = [f(x, v) for x in acc_tile[r]]
+            acc_tile[r] = scalar(acc_tile[r], v)
     elif rc == 1 and rr == tr:
         for r in range(tr):
-            v = raw[r][0]
-            acc_tile[r] = [f(x, v) for x in acc_tile[r]]
+            acc_tile[r] = scalar(acc_tile[r], raw[r][0])
     else:
         raise ValueError(
             f"广播失败：子块 {rr}×{rc} 对不上 tile {tr}×{tc} —— "
@@ -372,7 +397,7 @@ def _apply_step(step: tuple, acc_tile: T2, env: dict[str, T2], shapes: dict[str,
         else:
             raw = _tile_of(name, env, shapes[name], out_shape, tile, i, j)
             acc["global.load"] += _n_elems(raw)
-            _apply_binary(acc_tile, raw, lambda x, y: x + y)
+            _apply_binary(acc_tile, raw, "add")
     elif op == "mul":
         name, scalar = step[1], step[2]
         if scalar is not None:
@@ -381,7 +406,7 @@ def _apply_step(step: tuple, acc_tile: T2, env: dict[str, T2], shapes: dict[str,
         else:
             raw = _tile_of(name, env, shapes[name], out_shape, tile, i, j)
             acc["global.load"] += _n_elems(raw)
-            _apply_binary(acc_tile, raw, lambda x, y: x * y)
+            _apply_binary(acc_tile, raw, "mul")
     elif op == "softmax":
         for r, row in enumerate(acc_tile):
             acc_tile[r] = _softmax_row(row)
