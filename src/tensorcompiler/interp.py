@@ -202,14 +202,16 @@ def _run_kernel(k: Kernel, env: dict[str, T2], shapes: dict[str, Shape],
                     at = _slab(a_all, i * tm, tm, kk * tk, tk)
                     bt = _slab(b_all, kk * tk, tk, j * tn, tn)
                     acc["global.load"] += tm * tk + tk * tn
+                    # ⚠️ `at` / `bt` 是**刚切出来的新列表**（`_slab` 的返回值），
+                    #    直接把它们当作共享内存里的副本。原来这里又用
+                    #    `_slab(at, 0, tm, 0, tk)` 复制了一遍 —— 数据完全相同，
+                    #    但最热的路径上多了一倍的分配与拷贝。
+                    #    shared 的 store/load **照常计数**：这里省掉的是
+                    #    一次冗余拷贝，不是「过共享内存」这件事本身。
+                    sh_a, sh_b = at, bt
                     if tiled:
-                        # 真的过一遍共享内存（不是只记个数）
-                        sh_a = _slab(at, 0, tm, 0, tk)
-                        sh_b = _slab(bt, 0, tk, 0, tn)
                         acc["shared.store"] += tm * tk + tk * tn
                         acc["shared.load"] += tm * tk + tk * tn
-                    else:
-                        sh_a, sh_b = at, bt
                     # ⚠️ k 升序累加：kk 外层、q 内层 ⇒ k = kk·tk + q 升序，
                     #    与未分块时 k = 0..K-1 完全同序 ⇒ 逐位相等才成立。
                     for r in range(tm):
